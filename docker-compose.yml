@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  ascend-mcp:
+    build: .
+    environment:
+      - PORTFOLIO_API_URL=${PORTFOLIO_API_URL:-http://portfolio-app:3000/api}
+      - MCP_API_KEY=${MCP_API_KEY}
+    networks:
+      - portfolio_network
+    stdin_open: true
+    tty: true
+
+networks:
+  portfolio_network:
+    external: true
