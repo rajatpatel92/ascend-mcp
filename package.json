@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node build/index.js",
+    "test": "npm run build && node --test build/tests/unit/**/*.test.js",
+    "test:integration": "npm run build && node --test build/tests/integration/**/*.test.js",
+    "test:all": "npm run build && node --test build/tests/**/*.test.js"
   },
   "keywords": [],
   "author": "",

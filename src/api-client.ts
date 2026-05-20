@@ -1,19 +1,18 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-const API_URL = process.env.PORTFOLIO_API_URL || 'http://portfolio-app:3000/api';
-const API_KEY = process.env.MCP_API_KEY;
-
-if (!API_KEY) {
+if (!process.env.MCP_API_KEY) {
     console.warn('WARNING: MCP_API_KEY is not set. Requests to portfolio-app may be rejected.');
 }
 
 export async function apiClient(endpoint: string, options: RequestInit = {}) {
-    const url = `${API_URL}${endpoint}`;
+    const apiUrl = process.env.PORTFOLIO_API_URL || 'http://portfolio-app:3000/api';
+    const apiKey = process.env.MCP_API_KEY;
+    const url = `${apiUrl}${endpoint}`;
     
     const headers = new Headers(options.headers || {});
-    if (API_KEY) {
-        headers.set('x-api-key', API_KEY);
+    if (apiKey) {
+        headers.set('x-api-key', apiKey);
     }
     headers.set('Content-Type', 'application/json');
 
