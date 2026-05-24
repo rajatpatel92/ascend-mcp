@@ -38,16 +38,19 @@ describe('MCP Protocol Integration Tests', () => {
                 });
             } else if (req.url === '/api/analysis/AAPL' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ symbol: 'AAPL', price: 150.25, change: 1.5, personalCostBasis: 120.00 }));
+            } else if (req.url === '/api/market-data?symbol=AAPL' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ symbol: 'AAPL', price: 150.25, change: 1.5 }));
+            } else if (req.url === '/api/market-data?symbol=MSFT' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ symbol: 'MSFT', price: 340.50, change: 4.2 }));
             } else if (req.url === '/api/portfolio/history?range=1Y&currency=CAD' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ history: [{ date: '2026-05-20', value: 10000 }] }));
             } else if (req.url === '/api/activities' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] }));
-            } else if (req.url === '/api/market-data?symbol=MSFT' && req.method === 'GET') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ symbol: 'MSFT', price: 340.50, change: 4.2 }));
             } else {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: `Not found: ${req.url}` }));
@@ -167,7 +170,7 @@ describe('MCP Protocol Integration Tests', () => {
             
             const tools = listResponse.result.tools;
             assert.ok(Array.isArray(tools));
-            assert.strictEqual(tools.length, 5);
+            assert.strictEqual(tools.length, 6);
 
             // Check that all tools are present in tools list
             const toolNames = tools.map((t: any) => t.name);
@@ -176,8 +179,9 @@ describe('MCP Protocol Integration Tests', () => {
             assert.ok(toolNames.includes('add_activity'));
             assert.ok(toolNames.includes('get_holdings'));
             assert.ok(toolNames.includes('list_activities'));
+            assert.ok(toolNames.includes('get_holdings_data'));
 
-            // 6. Test 'get_holdings' tool execution
+            // 6. Test 'get_holdings' tool execution (aggregate quantity)
             const holdingsRequest = {
                 jsonrpc: '2.0',
                 id: 3,
@@ -225,7 +229,7 @@ describe('MCP Protocol Integration Tests', () => {
             assert.strictEqual(addActivityContent.success, true);
             assert.deepStrictEqual(addActivityContent.activity, addActivityPayload);
 
-            // 8. Test 'get_market_data' tool execution
+            // 8. Test 'get_market_data' tool execution (strictly public price details)
             const marketDataRequest = {
                 jsonrpc: '2.0',
                 id: 5,
@@ -282,24 +286,24 @@ describe('MCP Protocol Integration Tests', () => {
             const listActivitiesContent = JSON.parse(listActivitiesResponse.result.content[0].text);
             assert.deepStrictEqual(listActivitiesContent, { activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] });
 
-            // 11. Test 'get_market_data' tool fallback execution (symbol not owned)
-            const fallbackMarketDataRequest = {
+            // 11. Test new 'get_holdings_data' tool execution (rich portfolio statistics and account allocations)
+            const holdingsDataRequest = {
                 jsonrpc: '2.0',
                 id: 8,
                 method: 'tools/call',
                 params: {
-                    name: 'get_market_data',
-                    arguments: { symbol: 'MSFT' }
+                    name: 'get_holdings_data',
+                    arguments: { symbol: 'AAPL' }
                 }
             };
-            child.stdin.write(JSON.stringify(fallbackMarketDataRequest) + '\n');
-            const fallbackMarketDataResponse = await waitForMessage(8);
-            assert.strictEqual(fallbackMarketDataResponse.jsonrpc, '2.0');
-            assert.strictEqual(fallbackMarketDataResponse.id, 8);
-            assert.ok(fallbackMarketDataResponse.result);
-            assert.ok(!fallbackMarketDataResponse.isError);
-            const fallbackMarketDataContent = JSON.parse(fallbackMarketDataResponse.result.content[0].text);
-            assert.deepStrictEqual(fallbackMarketDataContent, { symbol: 'MSFT', price: 340.50, change: 4.2 });
+            child.stdin.write(JSON.stringify(holdingsDataRequest) + '\n');
+            const holdingsDataResponse = await waitForMessage(8);
+            assert.strictEqual(holdingsDataResponse.jsonrpc, '2.0');
+            assert.strictEqual(holdingsDataResponse.id, 8);
+            assert.ok(holdingsDataResponse.result);
+            assert.ok(!holdingsDataResponse.isError);
+            const holdingsDataContent = JSON.parse(holdingsDataResponse.result.content[0].text);
+            assert.deepStrictEqual(holdingsDataContent, { symbol: 'AAPL', price: 150.25, change: 1.5, personalCostBasis: 120.00 });
 
         } finally {
             // Clean up: terminate subprocess

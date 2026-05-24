@@ -6,6 +6,7 @@ import { executeAddActivity } from '../../tools/add_activity.js';
 import { executeGetMarketData } from '../../tools/get_market_data.js';
 import { executeGetPortfolioPerformance } from '../../tools/get_portfolio_performance.js';
 import { executeListActivities } from '../../tools/list_activities.js';
+import { executeGetHoldingsData } from '../../tools/get_holdings_data.js';
 
 // Import the API client module to mock it
 import * as apiClientModule from '../../api-client.js';
@@ -25,6 +26,8 @@ describe('MCP Tools Unit Tests', () => {
             } else if (endpoint === '/activities') {
                 return { activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] };
             } else if (endpoint.startsWith('/analysis')) {
+                return { symbol: 'AAPL', price: 150.25, change: 1.5, personalCostBasis: 120.00 };
+            } else if (endpoint.startsWith('/market-data')) {
                 return { symbol: 'AAPL', price: 150.25, change: 1.5 };
             } else if (endpoint.startsWith('/portfolio/history')) {
                 return { history: [{ date: '2026-05-20', value: 10000 }] };
@@ -58,27 +61,14 @@ describe('MCP Tools Unit Tests', () => {
         assert.deepStrictEqual(result.activity, payload);
     });
 
-    it('should call get_market_data API endpoint for symbol analysis', async () => {
+    it('should call get_market_data API endpoint for symbol market data', async () => {
         const result = await executeGetMarketData({ symbol: 'AAPL' });
         assert.deepStrictEqual(result, { symbol: 'AAPL', price: 150.25, change: 1.5 });
     });
 
-    it('should fallback to market-data endpoint when analysis endpoint returns error', async () => {
-        // Intercept/mock to return 404 for analysis and succeed for market-data
-        const fallbackMock = mock.method(apiClientModule, 'apiClient', async (endpoint: string) => {
-            if (endpoint.startsWith('/analysis/MSFT')) {
-                throw new Error('API Request failed (404): Investment not found');
-            }
-            if (endpoint.startsWith('/market-data?symbol=MSFT')) {
-                return { symbol: 'MSFT', price: 340.50, change: 4.2 };
-            }
-            throw new Error(`Unexpected endpoint: ${endpoint}`);
-        });
-
-        const result = await executeGetMarketData({ symbol: 'MSFT' });
-        assert.deepStrictEqual(result, { symbol: 'MSFT', price: 340.50, change: 4.2 });
-        
-        fallbackMock.mock.restore();
+    it('should call get_holdings_data API endpoint for rich portfolio stats and account allocations', async () => {
+        const result = await executeGetHoldingsData({ symbol: 'AAPL' });
+        assert.deepStrictEqual(result, { symbol: 'AAPL', price: 150.25, change: 1.5, personalCostBasis: 120.00 });
     });
 
     it('should call get_portfolio_performance history with correct defaults', async () => {

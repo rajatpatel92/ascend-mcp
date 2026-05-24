@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { apiClient } from "../api-client.js";
 
 export const getMarketDataTool = {
@@ -18,15 +17,5 @@ export const getMarketDataTool = {
 
 export async function executeGetMarketData(args: any) {
     const { symbol } = args;
-    try {
-        // Try fetching rich analysis data from portfolio app first (succeeds if symbol is owned)
-        return await apiClient(`/analysis/${symbol}`);
-    } catch (error: any) {
-        // If portfolio analysis fails, fallback to general market-data endpoint (works for any valid symbol)
-        try {
-            return await apiClient(`/market-data?symbol=${symbol}`);
-        } catch (fallbackError: any) {
-            throw new Error(`Failed to retrieve market data for ${symbol}: ${fallbackError.message}`);
-        }
-    }
+    return await apiClient(`/market-data?symbol=${symbol}`);
 }
