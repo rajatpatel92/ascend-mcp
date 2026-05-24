@@ -48,7 +48,26 @@ async function main() {
         const activeSessions = new Map<string, {
             server: Server;
             transport: SSEServerTransport;
+            cleanupTimeout?: NodeJS.Timeout;
         }>();
+
+        const getSessionId = (req: http.IncomingMessage, url: URL): string | null => {
+            // 1. Try query parameter
+            const querySessionId = url.searchParams.get("sessionId");
+            if (querySessionId) return querySessionId;
+
+            // 2. Try headers (case-insensitive check)
+            const headersToCheck = ["mcp-session-id", "session-id", "x-session-id"];
+            for (const headerName of headersToCheck) {
+                const headerValue = req.headers[headerName];
+                if (typeof headerValue === "string") {
+                    return headerValue;
+                } else if (Array.isArray(headerValue) && headerValue[0]) {
+                    return headerValue[0];
+                }
+            }
+            return null;
+        };
 
         const httpServer = http.createServer(async (req, res) => {
             // Enable CORS headers
@@ -62,13 +81,14 @@ async function main() {
                 return;
             }
 
-            const url = new URL(req.url || "", `http://${req.headers.host}`);
+            const host = req.headers.host || "localhost";
+            const url = new URL(req.url || "", `http://${host}`);
 
             if (url.pathname === "/sse" && req.method === "GET") {
                 // Prevent proxy buffering for SSE stream
                 res.setHeader("X-Accel-Buffering", "no");
 
-                const transport = new SSEServerTransport("/message", res);
+                const transport = new SSEServerTransport("/sse/message", res);
                 const sessionId = transport.sessionId;
                 const server = createMcpServer();
 
@@ -76,16 +96,27 @@ async function main() {
                 console.error(`New SSE connection established. Session ID: ${sessionId}`);
 
                 res.on("close", () => {
-                    activeSessions.delete(sessionId);
-                    console.error(`SSE connection closed. Removed Session ID: ${sessionId}`);
+                    console.error(`SSE connection closed. Scheduling cleanup for Session ID: ${sessionId}`);
+                    const session = activeSessions.get(sessionId);
+                    if (session) {
+                        // Clear any existing cleanup timeout
+                        if (session.cleanupTimeout) {
+                            clearTimeout(session.cleanupTimeout);
+                        }
+                        // Delay session removal by 60 seconds to handle transient client reconnects or in-flight requests
+                        session.cleanupTimeout = setTimeout(() => {
+                            activeSessions.delete(sessionId);
+                            console.error(`Session ID: ${sessionId} cleaned up from memory`);
+                        }, 60000);
+                    }
                 });
 
                 await server.connect(transport);
-            } else if (url.pathname === "/message" && req.method === "POST") {
-                const sessionId = url.searchParams.get("sessionId");
+            } else if ((url.pathname === "/message" || url.pathname === "/sse/message") && req.method === "POST") {
+                const sessionId = getSessionId(req, url);
                 if (!sessionId) {
                     res.writeHead(400, { "Content-Type": "text/plain" });
-                    res.end("Missing sessionId parameter");
+                    res.end("Missing sessionId parameter or header");
                     return;
                 }
 
@@ -94,6 +125,13 @@ async function main() {
                     res.writeHead(404, { "Content-Type": "text/plain" });
                     res.end("Session not found");
                     return;
+                }
+
+                // If connection drops but a new POST comes in before cleanup, keep the session active
+                if (session.cleanupTimeout) {
+                    clearTimeout(session.cleanupTimeout);
+                    session.cleanupTimeout = undefined;
+                    console.error(`Cancelled cleanup for Session ID: ${sessionId} due to incoming request`);
                 }
 
                 await session.transport.handlePostMessage(req, res);
