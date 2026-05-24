@@ -1,20 +1,75 @@
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import path from 'path';
+import http from 'node:http';
 
 describe('MCP Protocol Integration Tests', () => {
-    it('should complete initialize handshake and list tools successfully', async () => {
-        // Set env vars so server doesn't warn loudly or crash
+    let mockServer: http.Server;
+    const PORT = 4000;
+
+    before(() => {
+        // Start a mock HTTP server to simulate the Ascend Portfolio API
+        mockServer = http.createServer((req, res) => {
+            // Verify authentication headers and Content-Type
+            if (req.headers['x-api-key'] !== 'test-secret-key') {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Unauthorized: Invalid x-api-key' }));
+                return;
+            }
+
+            if (req.url === '/api/holdings?symbol=AAPL' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ symbol: 'AAPL', quantity: 42 }));
+            } else if (req.url === '/api/activities' && req.method === 'POST') {
+                let body = '';
+                req.on('data', chunk => {
+                    body += chunk.toString();
+                });
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body);
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, activity: parsed }));
+                    } catch (e) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+                    }
+                });
+            } else if (req.url === '/api/analysis/AAPL' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ symbol: 'AAPL', price: 150.25, change: 1.5 }));
+            } else if (req.url === '/api/portfolio/history?range=1Y&currency=CAD' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ history: [{ date: '2026-05-20', value: 10000 }] }));
+            } else if (req.url === '/api/activities' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] }));
+            } else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `Not found: ${req.url}` }));
+            }
+        });
+
+        mockServer.listen(PORT);
+    });
+
+    after(() => {
+        if (mockServer) {
+            mockServer.close();
+        }
+    });
+
+    it('should complete initialize handshake, list tools, and call all tools successfully', async () => {
+        // Set env vars pointing to our mock local server
         const env = {
             ...process.env,
-            PORTFOLIO_API_URL: 'http://test-api:4000/api',
+            PORTFOLIO_API_URL: `http://localhost:${PORT}/api`,
             MCP_API_KEY: 'test-secret-key'
         };
 
         // Spawn the compiled MCP server
         const serverPath = path.resolve(process.cwd(), 'build/index.js');
-
         const child = spawn('node', [serverPath], { env });
 
         // Buffer standard output and standard error
@@ -29,7 +84,7 @@ describe('MCP Protocol Integration Tests', () => {
             stderrData += data.toString();
         });
 
-        // Helper to wait for output containing a complete JSON line
+        // Helper to wait for output containing a complete JSON line with matching ID
         const waitForMessage = (id: number, timeoutMs = 8000): Promise<any> => {
             return new Promise((resolve, reject) => {
                 const startTime = Date.now();
@@ -111,13 +166,118 @@ describe('MCP Protocol Integration Tests', () => {
             assert.ok(Array.isArray(tools));
             assert.strictEqual(tools.length, 5);
 
-            // Check that all tools are present
+            // Check that all tools are present in tools list
             const toolNames = tools.map((t: any) => t.name);
             assert.ok(toolNames.includes('get_market_data'));
             assert.ok(toolNames.includes('get_portfolio_performance'));
             assert.ok(toolNames.includes('add_activity'));
             assert.ok(toolNames.includes('get_holdings'));
             assert.ok(toolNames.includes('list_activities'));
+
+            // 6. Test 'get_holdings' tool execution
+            const holdingsRequest = {
+                jsonrpc: '2.0',
+                id: 3,
+                method: 'tools/call',
+                params: {
+                    name: 'get_holdings',
+                    arguments: { symbol: 'AAPL' }
+                }
+            };
+            child.stdin.write(JSON.stringify(holdingsRequest) + '\n');
+            const holdingsResponse = await waitForMessage(3);
+            assert.strictEqual(holdingsResponse.jsonrpc, '2.0');
+            assert.strictEqual(holdingsResponse.id, 3);
+            assert.ok(holdingsResponse.result);
+            assert.ok(!holdingsResponse.isError);
+            const holdingsContent = JSON.parse(holdingsResponse.result.content[0].text);
+            assert.deepStrictEqual(holdingsContent, { symbol: 'AAPL', quantity: 42 });
+
+            // 7. Test 'add_activity' tool execution
+            const addActivityPayload = {
+                symbol: 'AAPL',
+                type: 'BUY',
+                date: '2026-05-20',
+                quantity: 10,
+                price: 150.25,
+                currency: 'USD',
+                platformId: 'test-platform'
+            };
+            const addActivityRequest = {
+                jsonrpc: '2.0',
+                id: 4,
+                method: 'tools/call',
+                params: {
+                    name: 'add_activity',
+                    arguments: addActivityPayload
+                }
+            };
+            child.stdin.write(JSON.stringify(addActivityRequest) + '\n');
+            const addActivityResponse = await waitForMessage(4);
+            assert.strictEqual(addActivityResponse.jsonrpc, '2.0');
+            assert.strictEqual(addActivityResponse.id, 4);
+            assert.ok(addActivityResponse.result);
+            assert.ok(!addActivityResponse.isError);
+            const addActivityContent = JSON.parse(addActivityResponse.result.content[0].text);
+            assert.strictEqual(addActivityContent.success, true);
+            assert.deepStrictEqual(addActivityContent.activity, addActivityPayload);
+
+            // 8. Test 'get_market_data' tool execution
+            const marketDataRequest = {
+                jsonrpc: '2.0',
+                id: 5,
+                method: 'tools/call',
+                params: {
+                    name: 'get_market_data',
+                    arguments: { symbol: 'AAPL' }
+                }
+            };
+            child.stdin.write(JSON.stringify(marketDataRequest) + '\n');
+            const marketDataResponse = await waitForMessage(5);
+            assert.strictEqual(marketDataResponse.jsonrpc, '2.0');
+            assert.strictEqual(marketDataResponse.id, 5);
+            assert.ok(marketDataResponse.result);
+            assert.ok(!marketDataResponse.isError);
+            const marketDataContent = JSON.parse(marketDataResponse.result.content[0].text);
+            assert.deepStrictEqual(marketDataContent, { symbol: 'AAPL', price: 150.25, change: 1.5 });
+
+            // 9. Test 'get_portfolio_performance' tool execution
+            const performanceRequest = {
+                jsonrpc: '2.0',
+                id: 6,
+                method: 'tools/call',
+                params: {
+                    name: 'get_portfolio_performance',
+                    arguments: { range: '1Y', currency: 'CAD' }
+                }
+            };
+            child.stdin.write(JSON.stringify(performanceRequest) + '\n');
+            const performanceResponse = await waitForMessage(6);
+            assert.strictEqual(performanceResponse.jsonrpc, '2.0');
+            assert.strictEqual(performanceResponse.id, 6);
+            assert.ok(performanceResponse.result);
+            assert.ok(!performanceResponse.isError);
+            const performanceContent = JSON.parse(performanceResponse.result.content[0].text);
+            assert.deepStrictEqual(performanceContent, { history: [{ date: '2026-05-20', value: 10000 }] });
+
+            // 10. Test 'list_activities' tool execution
+            const listActivitiesRequest = {
+                jsonrpc: '2.0',
+                id: 7,
+                method: 'tools/call',
+                params: {
+                    name: 'list_activities',
+                    arguments: {}
+                }
+            };
+            child.stdin.write(JSON.stringify(listActivitiesRequest) + '\n');
+            const listActivitiesResponse = await waitForMessage(7);
+            assert.strictEqual(listActivitiesResponse.jsonrpc, '2.0');
+            assert.strictEqual(listActivitiesResponse.id, 7);
+            assert.ok(listActivitiesResponse.result);
+            assert.ok(!listActivitiesResponse.isError);
+            const listActivitiesContent = JSON.parse(listActivitiesResponse.result.content[0].text);
+            assert.deepStrictEqual(listActivitiesContent, { activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] });
 
         } finally {
             // Clean up: terminate subprocess
