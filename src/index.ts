@@ -84,6 +84,10 @@ async function main() {
             const host = req.headers.host || "localhost";
             const url = new URL(req.url || "", `http://${host}`);
 
+            // Detailed request logging for remote debugging
+            console.error(`[MCP-DEBUG] Incoming Request: ${req.method} ${url.pathname}${url.search}`);
+            console.error(`[MCP-DEBUG] Headers: ${JSON.stringify(req.headers)}`);
+
             if (url.pathname === "/sse" && req.method === "GET") {
                 // Prevent proxy buffering for SSE stream
                 res.setHeader("X-Accel-Buffering", "no");
@@ -93,10 +97,10 @@ async function main() {
                 const server = createMcpServer();
 
                 activeSessions.set(sessionId, { server, transport });
-                console.error(`New SSE connection established. Session ID: ${sessionId}`);
+                console.error(`[MCP-DEBUG] Created session. Active sessions count: ${activeSessions.size}. Session ID: ${sessionId}`);
 
                 res.on("close", () => {
-                    console.error(`SSE connection closed. Scheduling cleanup for Session ID: ${sessionId}`);
+                    console.error(`[MCP-DEBUG] Connection closed. Scheduling delayed cleanup for Session ID: ${sessionId}`);
                     const session = activeSessions.get(sessionId);
                     if (session) {
                         // Clear any existing cleanup timeout
@@ -106,7 +110,7 @@ async function main() {
                         // Delay session removal by 60 seconds to handle transient client reconnects or in-flight requests
                         session.cleanupTimeout = setTimeout(() => {
                             activeSessions.delete(sessionId);
-                            console.error(`Session ID: ${sessionId} cleaned up from memory`);
+                            console.error(`[MCP-DEBUG] Session ID: ${sessionId} cleaned up from memory. Remaining: ${activeSessions.size}`);
                         }, 60000);
                     }
                 });
@@ -114,6 +118,9 @@ async function main() {
                 await server.connect(transport);
             } else if ((url.pathname === "/message" || url.pathname === "/sse/message") && req.method === "POST") {
                 const sessionId = getSessionId(req, url);
+                console.error(`[MCP-DEBUG] POST message request. Extracted Session ID: ${sessionId}`);
+                console.error(`[MCP-DEBUG] Current active sessions in Map: ${Array.from(activeSessions.keys()).join(", ")}`);
+
                 if (!sessionId) {
                     res.writeHead(400, { "Content-Type": "text/plain" });
                     res.end("Missing sessionId parameter or header");
@@ -122,6 +129,7 @@ async function main() {
 
                 const session = activeSessions.get(sessionId);
                 if (!session) {
+                    console.error(`[MCP-DEBUG] Session NOT found in Map for ID: ${sessionId}`);
                     res.writeHead(404, { "Content-Type": "text/plain" });
                     res.end("Session not found");
                     return;
@@ -131,7 +139,7 @@ async function main() {
                 if (session.cleanupTimeout) {
                     clearTimeout(session.cleanupTimeout);
                     session.cleanupTimeout = undefined;
-                    console.error(`Cancelled cleanup for Session ID: ${sessionId} due to incoming request`);
+                    console.error(`[MCP-DEBUG] Active connection recovered. Cancelled cleanup for Session ID: ${sessionId}`);
                 }
 
                 await session.transport.handlePostMessage(req, res);
@@ -142,7 +150,7 @@ async function main() {
         });
 
         httpServer.listen(PORT, () => {
-            console.error(`Ascend MCP Server running on HTTP/SSE at port ${PORT}`);
+            console.error(`[MCP-DEBUG] Ascend MCP Server running on HTTP/SSE at port ${PORT}`);
         });
 
     } else {
