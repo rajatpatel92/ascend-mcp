@@ -88,7 +88,7 @@ async function main() {
                 // Prevent proxy buffering for SSE stream
                 res.setHeader("X-Accel-Buffering", "no");
 
-                const transport = new SSEServerTransport("/sse/message", res);
+                const transport = new SSEServerTransport("/message", res);
                 const sessionId = transport.sessionId;
                 const server = createMcpServer();
 
