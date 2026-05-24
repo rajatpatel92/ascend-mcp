@@ -45,6 +45,9 @@ describe('MCP Protocol Integration Tests', () => {
             } else if (req.url === '/api/activities' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] }));
+            } else if (req.url === '/api/market-data?symbol=MSFT' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ symbol: 'MSFT', price: 340.50, change: 4.2 }));
             } else {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: `Not found: ${req.url}` }));
@@ -278,6 +281,25 @@ describe('MCP Protocol Integration Tests', () => {
             assert.ok(!listActivitiesResponse.isError);
             const listActivitiesContent = JSON.parse(listActivitiesResponse.result.content[0].text);
             assert.deepStrictEqual(listActivitiesContent, { activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] });
+
+            // 11. Test 'get_market_data' tool fallback execution (symbol not owned)
+            const fallbackMarketDataRequest = {
+                jsonrpc: '2.0',
+                id: 8,
+                method: 'tools/call',
+                params: {
+                    name: 'get_market_data',
+                    arguments: { symbol: 'MSFT' }
+                }
+            };
+            child.stdin.write(JSON.stringify(fallbackMarketDataRequest) + '\n');
+            const fallbackMarketDataResponse = await waitForMessage(8);
+            assert.strictEqual(fallbackMarketDataResponse.jsonrpc, '2.0');
+            assert.strictEqual(fallbackMarketDataResponse.id, 8);
+            assert.ok(fallbackMarketDataResponse.result);
+            assert.ok(!fallbackMarketDataResponse.isError);
+            const fallbackMarketDataContent = JSON.parse(fallbackMarketDataResponse.result.content[0].text);
+            assert.deepStrictEqual(fallbackMarketDataContent, { symbol: 'MSFT', price: 340.50, change: 4.2 });
 
         } finally {
             // Clean up: terminate subprocess

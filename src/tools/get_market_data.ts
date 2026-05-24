@@ -18,10 +18,15 @@ export const getMarketDataTool = {
 
 export async function executeGetMarketData(args: any) {
     const { symbol } = args;
-    // Note: To strictly follow portfolio-app API, we might not have a direct GET /api/market-data endpoint.
-    // However, if we need it, portfolio-app should expose it, or we could just use search API if available.
-    // Assuming portfolio-app exposes /api/investments or similar, or we can just fetch the activity holdings for now.
-    // Wait, the plan said "If portfolio-app lacks a direct /api/market-data endpoint, we might need to add a simple pass-through".
-    // I will use /api/analysis/[symbol] which might provide market data if it exists.
-    return await apiClient(`/analysis/${symbol}`);
+    try {
+        // Try fetching rich analysis data from portfolio app first (succeeds if symbol is owned)
+        return await apiClient(`/analysis/${symbol}`);
+    } catch (error: any) {
+        // If portfolio analysis fails, fallback to general market-data endpoint (works for any valid symbol)
+        try {
+            return await apiClient(`/market-data?symbol=${symbol}`);
+        } catch (fallbackError: any) {
+            throw new Error(`Failed to retrieve market data for ${symbol}: ${fallbackError.message}`);
+        }
+    }
 }

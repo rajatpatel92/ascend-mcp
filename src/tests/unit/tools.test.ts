@@ -63,6 +63,24 @@ describe('MCP Tools Unit Tests', () => {
         assert.deepStrictEqual(result, { symbol: 'AAPL', price: 150.25, change: 1.5 });
     });
 
+    it('should fallback to market-data endpoint when analysis endpoint returns error', async () => {
+        // Intercept/mock to return 404 for analysis and succeed for market-data
+        const fallbackMock = mock.method(apiClientModule, 'apiClient', async (endpoint: string) => {
+            if (endpoint.startsWith('/analysis/MSFT')) {
+                throw new Error('API Request failed (404): Investment not found');
+            }
+            if (endpoint.startsWith('/market-data?symbol=MSFT')) {
+                return { symbol: 'MSFT', price: 340.50, change: 4.2 };
+            }
+            throw new Error(`Unexpected endpoint: ${endpoint}`);
+        });
+
+        const result = await executeGetMarketData({ symbol: 'MSFT' });
+        assert.deepStrictEqual(result, { symbol: 'MSFT', price: 340.50, change: 4.2 });
+        
+        fallbackMock.mock.restore();
+    });
+
     it('should call get_portfolio_performance history with correct defaults', async () => {
         const result = await executeGetPortfolioPerformance({});
         assert.deepStrictEqual(result, { history: [{ date: '2026-05-20', value: 10000 }] });
