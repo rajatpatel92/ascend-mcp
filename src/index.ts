@@ -46,11 +46,17 @@ async function main() {
         const PORT = parseInt(process.env.PORT || "3001", 10);
         
         const server = createMcpServer();
+        server.onerror = (error) => {
+            console.error(`[MCP-DEBUG] Server Error:`, error);
+        };
         
         // Instantiate StreamableHTTPServerTransport in stateful mode
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
         });
+        transport.onerror = (error) => {
+            console.error(`[MCP-DEBUG] Transport Error:`, error);
+        };
 
         await server.connect(transport);
         console.error("[MCP-DEBUG] Connected server to StreamableHTTPServerTransport");
@@ -74,10 +80,27 @@ async function main() {
             console.error(`[MCP-DEBUG] Incoming Request: ${req.method} ${url.pathname}${url.search}`);
             console.error(`[MCP-DEBUG] Headers: ${JSON.stringify(req.headers)}`);
 
+            let parsedBody: any = undefined;
+            if (req.method === "POST") {
+                try {
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of req) {
+                        chunks.push(chunk as Buffer);
+                    }
+                    const bodyText = Buffer.concat(chunks).toString("utf-8");
+                    console.error(`[MCP-DEBUG] POST Payload: ${bodyText}`);
+                    if (bodyText) {
+                        parsedBody = JSON.parse(bodyText);
+                    }
+                } catch (e: any) {
+                    console.error(`[MCP-DEBUG] Failed to parse POST body:`, e.message);
+                }
+            }
+
             // Route all /sse requests (GET, POST, DELETE) to StreamableHTTPServerTransport
             if (url.pathname === "/sse" || url.pathname === "/sse/message" || url.pathname === "/message") {
                 try {
-                    await transport.handleRequest(req, res);
+                    await transport.handleRequest(req, res, parsedBody);
                 } catch (error) {
                     console.error(`[MCP-DEBUG] Transport handleRequest error:`, error);
                     res.writeHead(500, { "Content-Type": "text/plain" });
