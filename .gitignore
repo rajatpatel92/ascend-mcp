@@ -22,3 +22,5 @@ yarn-error.log*
 
 # research
 .research/
+homelab-ai.code-workspace
+test_sse.ts

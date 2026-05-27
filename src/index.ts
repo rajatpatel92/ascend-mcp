@@ -1,6 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools, executeTool } from "./tools/index.js";
 import http from "node:http";
@@ -45,21 +45,7 @@ async function main() {
     if (transportType === "sse") {
         const PORT = parseInt(process.env.PORT || "3001", 10);
         
-        const server = createMcpServer();
-        server.onerror = (error) => {
-            console.error(`[MCP-DEBUG] Server Error:`, error);
-        };
-        
-        // Instantiate StreamableHTTPServerTransport in stateful mode
-        const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-        });
-        transport.onerror = (error) => {
-            console.error(`[MCP-DEBUG] Transport Error:`, error);
-        };
-
-        await server.connect(transport);
-        console.error("[MCP-DEBUG] Connected server to StreamableHTTPServerTransport");
+        const transports = new Map<string, SSEServerTransport>();
 
         const httpServer = http.createServer(async (req, res) => {
             // Enable CORS headers
@@ -78,8 +64,7 @@ async function main() {
 
             // Detailed request logging for remote debugging
             console.error(`[MCP-DEBUG] Incoming Request: ${req.method} ${url.pathname}${url.search}`);
-            console.error(`[MCP-DEBUG] Headers: ${JSON.stringify(req.headers)}`);
-
+            
             let parsedBody: any = undefined;
             if (req.method === "POST") {
                 try {
@@ -88,7 +73,6 @@ async function main() {
                         chunks.push(chunk as Buffer);
                     }
                     const bodyText = Buffer.concat(chunks).toString("utf-8");
-                    console.error(`[MCP-DEBUG] POST Payload: ${bodyText}`);
                     if (bodyText) {
                         parsedBody = JSON.parse(bodyText);
                     }
@@ -97,23 +81,60 @@ async function main() {
                 }
             }
 
-            // Route all /sse requests (GET, POST, DELETE) to StreamableHTTPServerTransport
-            if (url.pathname === "/sse" || url.pathname === "/sse/message" || url.pathname === "/message") {
+            if (url.pathname === "/sse" && req.method === "GET") {
+                const transport = new SSEServerTransport("/message", res);
+                transport.onerror = (error) => {
+                    console.error(`[MCP-DEBUG] Transport Error:`, error);
+                };
+                transports.set(transport.sessionId, transport);
+                
+                res.on('close', () => {
+                    transports.delete(transport.sessionId);
+                });
+
+                const server = createMcpServer();
+                server.onerror = (error) => {
+                    console.error(`[MCP-DEBUG] Server Error:`, error);
+                };
+
                 try {
-                    await transport.handleRequest(req, res, parsedBody);
+                    await server.connect(transport);
+                    console.error(`[MCP-DEBUG] Connected SSE client ${transport.sessionId}`);
                 } catch (error) {
-                    console.error(`[MCP-DEBUG] Transport handleRequest error:`, error);
+                    console.error(`[MCP-DEBUG] Transport connect error:`, error);
+                }
+                return;
+            }
+
+            if (url.pathname === "/message" && req.method === "POST") {
+                const sessionId = url.searchParams.get("sessionId");
+                if (!sessionId) {
+                    res.writeHead(400, { "Content-Type": "text/plain" });
+                    res.end("Missing sessionId");
+                    return;
+                }
+                const transport = transports.get(sessionId);
+                if (!transport) {
+                    res.writeHead(404, { "Content-Type": "text/plain" });
+                    res.end("Session not found");
+                    return;
+                }
+                try {
+                    await transport.handlePostMessage(req, res, parsedBody);
+                } catch (error) {
+                    console.error(`[MCP-DEBUG] Transport handlePostMessage error:`, error);
                     res.writeHead(500, { "Content-Type": "text/plain" });
                     res.end("Internal Server Error");
                 }
-            } else {
-                res.writeHead(404, { "Content-Type": "text/plain" });
-                res.end("Not Found");
+                return;
             }
+
+            res.writeHead(404, { "Content-Type": "text/plain" });
+            res.end("Not Found");
         });
 
         httpServer.listen(PORT, () => {
-            console.error(`[MCP-DEBUG] Ascend MCP Server running on HTTP/SSE/Streamable at port ${PORT}`);
+            console.error(`[MCP-DEBUG] Ascend MCP Server running on HTTP/SSE at port ${PORT}`);
         });
 
     } else {
