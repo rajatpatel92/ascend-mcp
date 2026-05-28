@@ -4,6 +4,8 @@ import { addActivityTool, executeAddActivity } from './add_activity.js';
 import { getHoldingsTool, executeGetHoldings } from './get_holdings.js';
 import { listActivitiesTool, executeListActivities } from './list_activities.js';
 import { getHoldingsDataTool, executeGetHoldingsData } from './get_holdings_data.js';
+import { getPlatformsTool, executeGetPlatforms } from './get_platforms.js';
+import { getAccountsTool, executeGetAccounts } from './get_accounts.js';
 
 export function registerTools() {
     return [
@@ -12,7 +14,9 @@ export function registerTools() {
         addActivityTool,
         getHoldingsTool,
         listActivitiesTool,
-        getHoldingsDataTool
+        getHoldingsDataTool,
+        getPlatformsTool,
+        getAccountsTool
     ];
 }
 
@@ -30,6 +34,10 @@ export async function executeTool(name: string, args: any) {
             return await executeListActivities(args);
         case 'get_holdings_data':
             return await executeGetHoldingsData(args);
+        case 'get_platforms':
+            return await executeGetPlatforms(args);
+        case 'get_accounts':
+            return await executeGetAccounts(args);
         default:
             throw new Error(`Tool ${name} not found`);
     }
