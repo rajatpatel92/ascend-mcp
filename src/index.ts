@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools, executeTool } from "./tools/index.js";
 import http from "node:http";
@@ -45,7 +46,24 @@ async function main() {
     if (transportType === "sse") {
         const PORT = parseInt(process.env.PORT || "3001", 10);
         
-        const transports = new Map<string, SSEServerTransport>();
+        // Setup Streamable HTTP Server Transport
+        const streamableTransport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+        });
+        streamableTransport.onerror = (error) => {
+            console.error(`[MCP-DEBUG] Streamable Transport Error:`, error);
+        };
+        const streamableServer = createMcpServer();
+        streamableServer.onerror = (error) => {
+            console.error(`[MCP-DEBUG] Streamable Server Error:`, error);
+        };
+        
+        // Setup Legacy SSEServerTransport Map
+        const legacyTransports = new Map<string, SSEServerTransport>();
+
+        // Start Streamable HTTP server connection
+        await streamableServer.connect(streamableTransport);
+        console.error(`[MCP-DEBUG] Connected server to StreamableHTTPServerTransport`);
 
         const httpServer = http.createServer(async (req, res) => {
             // Enable CORS headers
@@ -81,7 +99,30 @@ async function main() {
                 }
             }
 
+            // Route Streamable HTTP endpoints (unified endpoint at /sse)
+            // Streamable HTTP uses POST /sse, GET /sse (with session ID), and DELETE /sse
+            if (url.pathname === "/sse") {
+                const sessionIdHeader = req.headers["mcp-session-id"];
+                const isStreamableGet = req.method === "GET" && sessionIdHeader !== undefined;
+                const isStreamablePost = req.method === "POST";
+                const isStreamableDelete = req.method === "DELETE";
+
+                if (isStreamableGet || isStreamablePost || isStreamableDelete) {
+                    console.error(`[MCP-DEBUG] Routing to Streamable HTTP (${req.method} /sse)`);
+                    try {
+                        await streamableTransport.handleRequest(req, res, parsedBody);
+                    } catch (error) {
+                        console.error(`[MCP-DEBUG] Streamable HTTP handleRequest error:`, error);
+                        res.writeHead(500, { "Content-Type": "text/plain" });
+                        res.end("Internal Server Error");
+                    }
+                    return;
+                }
+            }
+
+            // Route Legacy SSE GET /sse (without mcp-session-id header)
             if (url.pathname === "/sse" && req.method === "GET") {
+                console.error(`[MCP-DEBUG] Routing to Legacy SSE (GET /sse)`);
                 // Prevent Nginx and other reverse proxies from buffering SSE streams by intercepting writeHead
                 const originalWriteHead = res.writeHead;
                 res.writeHead = function (this: any, statusCode: number, ...args: any[]) {
@@ -92,17 +133,17 @@ async function main() {
                 
                 const transport = new SSEServerTransport("/message", res);
                 transport.onerror = (error) => {
-                    console.error(`[MCP-DEBUG] Transport Error:`, error);
+                    console.error(`[MCP-DEBUG] Legacy SSE Transport Error:`, error);
                 };
-                transports.set(transport.sessionId, transport);
+                legacyTransports.set(transport.sessionId, transport);
                 
                 res.on('close', () => {
-                    console.error(`[MCP-DEBUG] SSE connection closed for client ${transport.sessionId}. Starting 15s grace period.`);
+                    console.error(`[MCP-DEBUG] Legacy SSE connection closed for client ${transport.sessionId}. Starting 15s grace period.`);
                     // Grace period of 15 seconds before deleting the session
                     // to survive temporary proxy disconnects/reconnects during initialization
                     setTimeout(() => {
-                        console.error(`[MCP-DEBUG] Grace period expired. Deleting session ${transport.sessionId}`);
-                        transports.delete(transport.sessionId);
+                        console.error(`[MCP-DEBUG] Legacy SSE grace period expired. Deleting session ${transport.sessionId}`);
+                        legacyTransports.delete(transport.sessionId);
                     }, 15000);
                 });
 
@@ -113,22 +154,23 @@ async function main() {
 
                 try {
                     await server.connect(transport);
-                    console.error(`[MCP-DEBUG] Connected SSE client ${transport.sessionId}`);
+                    console.error(`[MCP-DEBUG] Connected Legacy SSE client ${transport.sessionId}`);
                 } catch (error) {
-                    console.error(`[MCP-DEBUG] Transport connect error:`, error);
+                    console.error(`[MCP-DEBUG] Legacy SSE Transport connect error:`, error);
                 }
                 return;
             }
 
+            // Route Legacy SSE POST /message
             if (url.pathname === "/message" && req.method === "POST") {
                 const sessionId = url.searchParams.get("sessionId");
-                console.error(`[MCP-DEBUG] POST /message lookup: sessionId="${sessionId}", availableKeys=${JSON.stringify(Array.from(transports.keys()))}`);
+                console.error(`[MCP-DEBUG] Legacy POST /message lookup: sessionId="${sessionId}", availableKeys=${JSON.stringify(Array.from(legacyTransports.keys()))}`);
                 if (!sessionId) {
                     res.writeHead(400, { "Content-Type": "text/plain" });
                     res.end("Missing sessionId");
                     return;
                 }
-                const transport = transports.get(sessionId);
+                const transport = legacyTransports.get(sessionId);
                 if (!transport) {
                     res.writeHead(404, { "Content-Type": "text/plain" });
                     res.end("Session not found");
@@ -137,7 +179,7 @@ async function main() {
                 try {
                     await transport.handlePostMessage(req, res, parsedBody);
                 } catch (error) {
-                    console.error(`[MCP-DEBUG] Transport handlePostMessage error:`, error);
+                    console.error(`[MCP-DEBUG] Legacy Transport handlePostMessage error:`, error);
                     res.writeHead(500, { "Content-Type": "text/plain" });
                     res.end("Internal Server Error");
                 }
