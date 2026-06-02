@@ -97,9 +97,11 @@ async function main() {
                 transports.set(transport.sessionId, transport);
                 
                 res.on('close', () => {
+                    console.error(`[MCP-DEBUG] SSE connection closed for client ${transport.sessionId}. Starting 15s grace period.`);
                     // Grace period of 15 seconds before deleting the session
                     // to survive temporary proxy disconnects/reconnects during initialization
                     setTimeout(() => {
+                        console.error(`[MCP-DEBUG] Grace period expired. Deleting session ${transport.sessionId}`);
                         transports.delete(transport.sessionId);
                     }, 15000);
                 });
@@ -120,6 +122,7 @@ async function main() {
 
             if (url.pathname === "/message" && req.method === "POST") {
                 const sessionId = url.searchParams.get("sessionId");
+                console.error(`[MCP-DEBUG] POST /message lookup: sessionId="${sessionId}", availableKeys=${JSON.stringify(Array.from(transports.keys()))}`);
                 if (!sessionId) {
                     res.writeHead(400, { "Content-Type": "text/plain" });
                     res.end("Missing sessionId");
