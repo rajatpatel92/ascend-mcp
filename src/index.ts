@@ -82,9 +82,13 @@ async function main() {
             }
 
             if (url.pathname === "/sse" && req.method === "GET") {
-                // Prevent Nginx and other reverse proxies from buffering SSE streams
-                res.setHeader("X-Accel-Buffering", "no");
-                res.setHeader("Cache-Control", "no-cache, no-transform");
+                // Prevent Nginx and other reverse proxies from buffering SSE streams by intercepting writeHead
+                const originalWriteHead = res.writeHead;
+                res.writeHead = function (this: any, statusCode: number, ...args: any[]) {
+                    res.setHeader("X-Accel-Buffering", "no");
+                    res.setHeader("Cache-Control", "no-cache, no-transform");
+                    return originalWriteHead.call(this, statusCode, ...args);
+                } as any;
                 
                 const transport = new SSEServerTransport("/message", res);
                 transport.onerror = (error) => {
@@ -93,7 +97,11 @@ async function main() {
                 transports.set(transport.sessionId, transport);
                 
                 res.on('close', () => {
-                    transports.delete(transport.sessionId);
+                    // Grace period of 15 seconds before deleting the session
+                    // to survive temporary proxy disconnects/reconnects during initialization
+                    setTimeout(() => {
+                        transports.delete(transport.sessionId);
+                    }, 15000);
                 });
 
                 const server = createMcpServer();
