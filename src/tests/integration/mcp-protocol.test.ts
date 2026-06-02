@@ -51,6 +51,12 @@ describe('MCP Protocol Integration Tests', () => {
             } else if (req.url === '/api/activities' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] }));
+            } else if (req.url === '/api/platforms' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ platforms: [{ id: 'test-platform', name: 'Test Platform' }] }));
+            } else if (req.url === '/api/accounts' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ accounts: [{ id: 'test-account', name: 'Test Account' }] }));
             } else {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: `Not found: ${req.url}` }));
@@ -170,7 +176,7 @@ describe('MCP Protocol Integration Tests', () => {
             
             const tools = listResponse.result.tools;
             assert.ok(Array.isArray(tools));
-            assert.strictEqual(tools.length, 6);
+            assert.strictEqual(tools.length, 8);
 
             // Check that all tools are present in tools list
             const toolNames = tools.map((t: any) => t.name);
@@ -180,6 +186,8 @@ describe('MCP Protocol Integration Tests', () => {
             assert.ok(toolNames.includes('get_holdings'));
             assert.ok(toolNames.includes('list_activities'));
             assert.ok(toolNames.includes('get_holdings_data'));
+            assert.ok(toolNames.includes('get_platforms'));
+            assert.ok(toolNames.includes('get_accounts'));
 
             // 6. Test 'get_holdings' tool execution (aggregate quantity)
             const holdingsRequest = {
@@ -304,6 +312,44 @@ describe('MCP Protocol Integration Tests', () => {
             assert.ok(!holdingsDataResponse.isError);
             const holdingsDataContent = JSON.parse(holdingsDataResponse.result.content[0].text);
             assert.deepStrictEqual(holdingsDataContent, { symbol: 'AAPL', price: 150.25, change: 1.5, personalCostBasis: 120.00 });
+
+            // 12. Test 'get_platforms' tool execution
+            const platformsRequest = {
+                jsonrpc: '2.0',
+                id: 9,
+                method: 'tools/call',
+                params: {
+                    name: 'get_platforms',
+                    arguments: {}
+                }
+            };
+            child.stdin.write(JSON.stringify(platformsRequest) + '\n');
+            const platformsResponse = await waitForMessage(9);
+            assert.strictEqual(platformsResponse.jsonrpc, '2.0');
+            assert.strictEqual(platformsResponse.id, 9);
+            assert.ok(platformsResponse.result);
+            assert.ok(!platformsResponse.isError);
+            const platformsContent = JSON.parse(platformsResponse.result.content[0].text);
+            assert.deepStrictEqual(platformsContent, { platforms: [{ id: 'test-platform', name: 'Test Platform' }] });
+
+            // 13. Test 'get_accounts' tool execution
+            const accountsRequest = {
+                jsonrpc: '2.0',
+                id: 10,
+                method: 'tools/call',
+                params: {
+                    name: 'get_accounts',
+                    arguments: {}
+                }
+            };
+            child.stdin.write(JSON.stringify(accountsRequest) + '\n');
+            const accountsResponse = await waitForMessage(10);
+            assert.strictEqual(accountsResponse.jsonrpc, '2.0');
+            assert.strictEqual(accountsResponse.id, 10);
+            assert.ok(accountsResponse.result);
+            assert.ok(!accountsResponse.isError);
+            const accountsContent = JSON.parse(accountsResponse.result.content[0].text);
+            assert.deepStrictEqual(accountsContent, { accounts: [{ id: 'test-account', name: 'Test Account' }] });
 
         } finally {
             // Clean up: terminate subprocess

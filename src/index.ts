@@ -82,6 +82,10 @@ async function main() {
             }
 
             if (url.pathname === "/sse" && req.method === "GET") {
+                // Prevent Nginx and other reverse proxies from buffering SSE streams
+                res.setHeader("X-Accel-Buffering", "no");
+                res.setHeader("Cache-Control", "no-cache, no-transform");
+                
                 const transport = new SSEServerTransport("/message", res);
                 transport.onerror = (error) => {
                     console.error(`[MCP-DEBUG] Transport Error:`, error);

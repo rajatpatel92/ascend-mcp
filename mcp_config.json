@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ascend-mcp": {
+      "command": "node",
+      "args": [
+        "/Users/rajat/Repositories/ascend-mcp/build/index.js"
+      ],
+      "env": {
+        "PORTFOLIO_API_URL": "http://localhost:3000/api",
+        "MCP_API_KEY": "your_secure_random_string",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
