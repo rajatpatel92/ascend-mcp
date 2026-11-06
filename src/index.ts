@@ -5,7 +5,18 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools, executeTool } from "./tools/index.js";
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+
+function safeCompare(a?: string | null, b?: string | null): boolean {
+    if (!a || !b) return false;
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) {
+        timingSafeEqual(bufA, bufA);
+        return false;
+    }
+    return timingSafeEqual(bufA, bufB);
+}
 
 function createMcpServer() {
     const server = new Server({
@@ -66,9 +77,17 @@ async function main() {
         console.error(`[MCP-DEBUG] Connected server to StreamableHTTPServerTransport`);
 
         const httpServer = http.createServer(async (req, res) => {
-            // Enable CORS headers
-            res.setHeader("Access-Control-Allow-Origin", "*");
-            res.setHeader("Access-Control-Allow-Headers", "*");
+            // Restricted CORS headers
+            const origin = req.headers.origin;
+            const allowedOrigin = process.env.ALLOWED_ORIGIN || "http://localhost:3000";
+            if (allowedOrigin === "*") {
+                res.setHeader("Access-Control-Allow-Origin", "*");
+            } else if (origin && (origin === allowedOrigin || origin === "http://localhost:3000")) {
+                res.setHeader("Access-Control-Allow-Origin", origin);
+            } else if (!origin) {
+                res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+            }
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, mcp-session-id");
             res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE");
 
             if (req.method === "OPTIONS") {
@@ -80,16 +99,58 @@ async function main() {
             const host = req.headers.host || "localhost";
             const url = new URL(req.url || "", `http://${host}`);
 
+            // Enforce API Key authentication in HTTP/SSE mode (fail-closed unless explicitly allowed in dev)
+            const allowUnauthenticated = process.env.ALLOW_UNAUTHENTICATED === "true";
+            if (!process.env.MCP_API_KEY && !allowUnauthenticated) {
+                console.error(`[MCP-DEBUG] Server configuration error: MCP_API_KEY is not configured for HTTP/SSE transport`);
+                res.writeHead(500, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Server Configuration Error: MCP_API_KEY must be set in HTTP/SSE mode" }));
+                return;
+            }
+
+            if (process.env.MCP_API_KEY) {
+                const headerKey = req.headers["x-api-key"] as string | undefined;
+                const queryKey = url.searchParams.get("apiKey");
+                const authHeader = req.headers.authorization;
+                const bearerKey = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+                const providedKey = headerKey || queryKey || bearerKey;
+
+                if (!providedKey || !safeCompare(providedKey, process.env.MCP_API_KEY)) {
+                    console.error(`[MCP-DEBUG] Unauthorized request to ${url.pathname} from ${req.socket.remoteAddress}`);
+                    res.writeHead(401, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Unauthorized: Invalid or missing API key" }));
+                    return;
+                }
+            }
+
             // Detailed request logging for remote debugging
             console.error(`[MCP-DEBUG] Incoming Request: ${req.method} ${url.pathname}${url.search}`);
             
             let parsedBody: any = undefined;
             if (req.method === "POST") {
                 try {
+                    const MAX_BODY_SIZE = 1024 * 1024; // 1MB limit
+                    let totalBytes = 0;
                     const chunks: Buffer[] = [];
+                    let bodyExceeded = false;
+
                     for await (const chunk of req) {
+                        totalBytes += (chunk as Buffer).length;
+                        if (totalBytes > MAX_BODY_SIZE) {
+                            bodyExceeded = true;
+                            break;
+                        }
                         chunks.push(chunk as Buffer);
                     }
+
+                    if (bodyExceeded) {
+                        console.error(`[MCP-DEBUG] Request body exceeded 1MB limit`);
+                        req.destroy();
+                        res.writeHead(413, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Payload Too Large: maximum body size is 1MB" }));
+                        return;
+                    }
+
                     const bodyText = Buffer.concat(chunks).toString("utf-8");
                     if (bodyText) {
                         parsedBody = JSON.parse(bodyText);

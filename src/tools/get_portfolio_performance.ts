@@ -23,5 +23,6 @@ export const getPortfolioPerformanceTool = {
 export async function executeGetPortfolioPerformance(args: any) {
     const range = args.range || "1Y";
     const currency = args.currency || "CAD";
-    return await apiClient(`/portfolio/history?range=${range}&currency=${currency}`);
+    return await apiClient(`/portfolio/history?range=${encodeURIComponent(range)}&currency=${encodeURIComponent(currency)}`);
 }
+

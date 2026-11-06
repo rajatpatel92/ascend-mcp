@@ -17,5 +17,6 @@ export const getMarketDataTool = {
 
 export async function executeGetMarketData(args: any) {
     const { symbol } = args;
-    return await apiClient(`/market-data?symbol=${symbol}`);
+    return await apiClient(`/market-data?symbol=${encodeURIComponent(symbol)}`);
 }
+

@@ -13,5 +13,6 @@ export const getHoldingsTool = {
 };
 
 export async function executeGetHoldings(args: any) {
-    return await apiClient(`/holdings?symbol=${args.symbol}`);
+    return await apiClient(`/holdings?symbol=${encodeURIComponent(args.symbol)}`);
 }
+
