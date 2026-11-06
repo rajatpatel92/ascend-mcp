@@ -93,4 +93,15 @@ describe('MCP Tools Unit Tests', () => {
         const result = await executeListActivities({});
         assert.deepStrictEqual(result, { activities: [{ id: '1', symbol: 'AAPL', type: 'BUY' }] });
     });
+
+    it('should call list_activities API endpoint with pagination params', async () => {
+        const localMock = mock.method(apiClientModule, 'apiClient', async (endpoint: string) => {
+            assert.strictEqual(endpoint, '/activities?limit=25&offset=50');
+            return { activities: [{ id: '2', symbol: 'MSFT', type: 'BUY' }] };
+        });
+
+        const result = await executeListActivities({ limit: 25, offset: 50 });
+        assert.deepStrictEqual(result, { activities: [{ id: '2', symbol: 'MSFT', type: 'BUY' }] });
+        localMock.mock.restore();
+    });
 });
