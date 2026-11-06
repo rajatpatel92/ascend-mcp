@@ -115,4 +115,25 @@ describe('API Client Unit Tests', () => {
             /API Request failed \(500\): Internal Server Error/
         );
     });
+
+    it('should normalize URLs with trailing slashes in PORTFOLIO_API_URL and missing leading slash in endpoint', async () => {
+        process.env.PORTFOLIO_API_URL = 'http://test-api:4000/api///';
+        process.env.MCP_API_KEY = 'test-key';
+
+        globalThis.fetch = mock.fn(async (url: any, options: any) => {
+            assert.strictEqual(url, 'http://test-api:4000/api/holdings');
+            assert.ok(options.signal, 'options.signal should be set for timeout protection');
+            return {
+                ok: true,
+                status: 200,
+                statusText: 'OK',
+                json: async () => ({ normalized: true })
+            } as any;
+        });
+
+        const apiClient = getApiClient();
+        const result = await apiClient('holdings');
+        assert.deepStrictEqual(result, { normalized: true });
+    });
 });
+

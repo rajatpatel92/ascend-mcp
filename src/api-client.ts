@@ -6,9 +6,11 @@ if (!process.env.MCP_API_KEY) {
 }
 
 export async function apiClient(endpoint: string, options: RequestInit = {}) {
-    const apiUrl = process.env.PORTFOLIO_API_URL || 'http://portfolio-app:3000/api';
+    const rawApiUrl = process.env.PORTFOLIO_API_URL || 'http://ascend:3000/api';
+    const apiUrl = rawApiUrl.replace(/\/+$/, '');
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     const apiKey = process.env.MCP_API_KEY;
-    const url = `${apiUrl}${endpoint}`;
+    const url = `${apiUrl}${cleanEndpoint}`;
     
     const headers = new Headers(options.headers || {});
     if (apiKey) {
@@ -16,7 +18,8 @@ export async function apiClient(endpoint: string, options: RequestInit = {}) {
     }
     headers.set('Content-Type', 'application/json');
 
-    const response = await fetch(url, { ...options, headers });
+    const signal = options.signal || AbortSignal.timeout(15000);
+    const response = await fetch(url, { ...options, headers, signal });
     
     if (!response.ok) {
         let errorMsg = response.statusText;

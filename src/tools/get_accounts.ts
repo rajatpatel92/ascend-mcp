@@ -15,9 +15,10 @@ export const getAccountsTool = {
 export async function executeGetAccounts(args: any) {
     let url = `/accounts`;
     if (args && args.platformId) {
-        url += `?platformId=${args.platformId}`;
+        url += `?platformId=${encodeURIComponent(args.platformId)}`;
     }
     return await apiClient(url, {
         method: 'GET'
     });
 }
+

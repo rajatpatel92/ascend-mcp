@@ -17,5 +17,6 @@ export const getHoldingsDataTool = {
 
 export async function executeGetHoldingsData(args: any) {
     const { symbol } = args;
-    return await apiClient(`/analysis/${symbol}`);
+    return await apiClient(`/analysis/${encodeURIComponent(symbol)}`);
 }
+
